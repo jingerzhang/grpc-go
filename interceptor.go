@@ -22,6 +22,9 @@ import (
 	"context"
 )
 
+// todo 了解 unary 和 stream 在拦截器方面的区别
+
+
 // UnaryInvoker is called by UnaryClientInterceptor to complete RPCs.
 type UnaryInvoker func(ctx context.Context, method string, req, reply interface{}, cc *ClientConn, opts ...CallOption) error
 

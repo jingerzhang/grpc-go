@@ -423,6 +423,8 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 	}
 	s.ctxDone = s.ctx.Done()
 	s.wq = newWriteQuota(defaultWriteQuota, s.ctxDone)
+	// todo 猜测对于同一client request 的 stream 的多个请求数据，共用同一个streamId 信息， 然后
+	// todo recvBufferReader 中 buf 中的 channel 接收后续同一 stream 请求给到相应的业务逻辑处理
 	s.trReader = &transportReader{
 		reader: &recvBufferReader{
 			ctx:        s.ctx,
@@ -443,12 +445,18 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 	return false
 }
 
+// httpsServer 是 grpc server transport 的实现
+// 代表 server 端一个请求连接
+// 循环读取请求并调用 handle 方法入参，进行实际业务请求逻辑处理
+// activeStreams 维护当前 server transport 的 stream 信息
+
 // HandleStreams receives incoming streams using the given handler. This is
 // typically run in a separate goroutine.
 // traceCtx attaches trace to ctx and returns the new context.
 func (t *http2Server) HandleStreams(handle func(*Stream), traceCtx func(context.Context, string) context.Context) {
 	defer close(t.readerDone)
 	for {
+		// todo 在当前连接上循环读取请求内容，不会阻塞等待完成业务处理并回复
 		t.controlBuf.throttle()
 		frame, err := t.framer.fr.ReadFrame()
 		atomic.StoreInt64(&t.lastRead, time.Now().UnixNano())

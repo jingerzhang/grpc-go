@@ -1,0 +1,10 @@
+
+.idea/
+
+go.mod
+
+*.mod
+
+examples/go.sum
+
+*.sum

@@ -92,12 +92,15 @@ var (
 )
 
 const (
+	// todo client max receive/send message 差异的考虑  @jingzhang
 	defaultClientMaxReceiveMessageSize = 1024 * 1024 * 4
 	defaultClientMaxSendMessageSize    = math.MaxInt32
 	// http2IOBufSize specifies the buffer size for sending frames.
 	defaultWriteBufSize = 32 * 1024
 	defaultReadBufSize  = 32 * 1024
 )
+
+
 
 // Dial creates a client connection to the given target.
 func Dial(target string, opts ...DialOption) (*ClientConn, error) {
@@ -137,7 +140,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		opt.apply(&cc.dopts)
 	}
 
+	// todo 确认相关操作
 	chainUnaryClientInterceptors(cc)
+	// todo 确认相关操作
 	chainStreamClientInterceptors(cc)
 
 	defer func() {
@@ -146,6 +151,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}()
 
+	// clientConn 的请求/状态/统计等相关记录信息  @jingzhang
 	if channelz.IsOn() {
 		if cc.dopts.channelzParentID != 0 {
 			cc.channelzID = channelz.RegisterChannel(&channelzChannel{cc}, cc.dopts.channelzParentID, target)
@@ -164,6 +170,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		cc.csMgr.channelzID = cc.channelzID
 	}
 
+	// clientConn 连接认证相关、安全性  @jignzhang
 	if !cc.dopts.insecure {
 		if cc.dopts.copts.TransportCredentials == nil && cc.dopts.copts.CredsBundle == nil {
 			return nil, errNoTransportSecurity
@@ -182,6 +189,8 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}
 
+	// todo 服务配置功能了解  @jingzhang
+	// https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
 	if cc.dopts.defaultServiceConfigRawJSON != nil {
 		scpr := parseServiceConfig(*cc.dopts.defaultServiceConfigRawJSON)
 		if scpr.Err != nil {
@@ -191,6 +200,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 	}
 	cc.mkp = cc.dopts.copts.KeepaliveParams
 
+	// todo 了解dial完成的工作  @jingzhang
 	if cc.dopts.copts.Dialer == nil {
 		cc.dopts.copts.Dialer = func(ctx context.Context, addr string) (net.Conn, error) {
 			network, addr := parseDialTarget(addr)
@@ -201,12 +211,14 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}
 
+	// todo user agent 功能
 	if cc.dopts.copts.UserAgent != "" {
 		cc.dopts.copts.UserAgent += " " + grpcUA
 	} else {
 		cc.dopts.copts.UserAgent = grpcUA
 	}
 
+	// todo 这里的timeout是指什么超时时间
 	if cc.dopts.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cc.dopts.timeout)
@@ -227,6 +239,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}()
 
+	// todo 初始 service config 设置
 	scSet := false
 	if cc.dopts.scChan != nil {
 		// Try to get an initial service config.
@@ -239,6 +252,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		default:
 		}
 	}
+	// backoff default config
 	if cc.dopts.bs == nil {
 		cc.dopts.bs = backoff.DefaultExponential
 	}
@@ -262,6 +276,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}
 
+	// todo  auth 和 transportCredential 区别与联系
 	creds := cc.dopts.copts.TransportCredentials
 	if creds != nil && creds.Info().ServerName != "" {
 		cc.authority = creds.Info().ServerName
@@ -273,6 +288,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		cc.authority = cc.parsedTarget.Endpoint
 	}
 
+	// todo service config 相关
 	if cc.dopts.scChan != nil && !scSet {
 		// Blocking wait for the initial service config.
 		select {
@@ -292,6 +308,8 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 	if creds := cc.dopts.copts.TransportCredentials; creds != nil {
 		credsClone = creds.Clone()
 	}
+
+	// 负载均衡相关的设置参数
 	cc.balancerBuildOpts = balancer.BuildOptions{
 		DialCreds:        credsClone,
 		CredsBundle:      cc.dopts.copts.CredsBundle,
@@ -300,6 +318,8 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		Target:           cc.parsedTarget,
 	}
 
+
+	// 解析器 resolver builder， 解析target
 	// Build the resolver.
 	rWrapper, err := newCCResolverWrapper(cc, resolverBuilder)
 	if err != nil {
@@ -309,6 +329,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 	cc.resolverWrapper = rWrapper
 	cc.mu.Unlock()
 
+	// 阻塞等待 client conn ready
 	// A blocking dial blocks until the clientConn is ready.
 	if cc.dopts.block {
 		for {
@@ -325,6 +346,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 					}
 				}
 			}
+			// 等待连接状态变化
 			if !cc.WaitForStateChange(ctx, s) {
 				// ctx got timeout or canceled.
 				if err = cc.connectionError(); err != nil && cc.dopts.returnLastError {
@@ -335,6 +357,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		}
 	}
 
+	// 返回 client conn
 	return cc, nil
 }
 
@@ -525,6 +548,7 @@ func (cc *ClientConn) GetState() connectivity.State {
 	return cc.csMgr.getState()
 }
 
+// todo  service config 相关， dopts channel， 可忽略
 func (cc *ClientConn) scWatcher() {
 	for {
 		select {

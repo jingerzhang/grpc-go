@@ -597,6 +597,7 @@ func (cs *clientStream) Context() context.Context {
 
 func (cs *clientStream) withRetry(op func(a *csAttempt) error, onSuccess func()) error {
 	cs.mu.Lock()
+	// todo 这个 for 循环和 retryLocked 内部的 for 循环，分别对应的场景
 	for {
 		if cs.committed {
 			cs.mu.Unlock()

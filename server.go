@@ -480,6 +480,7 @@ func (s *Server) stopServerWorkers() {
 	}
 }
 
+// 第一步， new grpc server
 // NewServer creates a gRPC server which has no service registered and has not
 // started to accept requests yet.
 func NewServer(opt ...ServerOption) *Server {
@@ -496,6 +497,7 @@ func NewServer(opt ...ServerOption) *Server {
 		done:   grpcsync.NewEvent(),
 		czData: new(channelzData),
 	}
+	// todo 了解这里变动的原因
 	chainUnaryServerInterceptors(s)
 	chainStreamServerInterceptors(s)
 	s.cv = sync.NewCond(&s.mu)
@@ -530,6 +532,8 @@ func (s *Server) errorf(format string, a ...interface{}) {
 	}
 }
 
+// 第二步， 在 grpc server 中注册 service
+// 在 相应 pb 生成的 pb.go 文件中调用
 // RegisterService registers a service and its implementation to the gRPC
 // server. It is called from the IDL generated code. This must be called before
 // invoking Serve.
@@ -646,6 +650,13 @@ func (l *listenSocket) Close() error {
 	return err
 }
 
+// 第三步 启动 grpc server
+// server accepts incoming connections on the listener lis, creating a new serverTransport and
+// service goroutine for each. the service goroutines read gRPC requests and then call the registered
+// handlers to reply to them.
+// serve returns when lis.Accept fails with fatal errors. lis will be close when this method returns.
+// serve will return a non-nil error unless stop or GracefulStop is called.
+
 // Serve accepts incoming connections on the listener lis, creating a new
 // ServerTransport and service goroutine for each. The service goroutines
 // read gRPC requests and then call the registered handlers to reply to them.
@@ -734,12 +745,17 @@ func (s *Server) Serve(lis net.Listener) error {
 		// s.conns before this conn can be added.
 		s.serveWG.Add(1)
 		go func() {
+			// 对于server端收到的每个连接请求，创建一个新的 goroutine 进行处理
 			s.handleRawConn(rawConn)
 			s.serveWG.Done()
 		}()
 	}
 }
 
+// 第四步 对于server端收到的每个连接请求，创建一个新的 goroutine 进行处理
+// 在当前 goroutine 中完成 http2 handshaking， new https serverTransport -> st
+// 添加 st 到当前 server 的维护列表中
+// 启动新的 goroutine 进行业务逻辑的处理 ？
 // handleRawConn forks a goroutine to handle a just-accepted connection that
 // has not had any I/O performed on it yet.
 func (s *Server) handleRawConn(rawConn net.Conn) {
@@ -773,8 +789,13 @@ func (s *Server) handleRawConn(rawConn net.Conn) {
 	if !s.addConn(st) {
 		return
 	}
+	// todo 了解这里的 commit 背景， #1745
+	// todo 为什么要启动新的 goroutine 进行业务逻辑的处理
 	go func() {
 		s.serveStreams(st)
+		// 业务处理完成，移除当前 serverTransport
+		// todo 注意：确认一个 serverTransport 的业务使用场景，
+		// todo 应该是有循环处理多个业务请求
 		s.removeConn(st)
 	}()
 }
@@ -816,7 +837,10 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 
 	var roundRobinCounter uint32
 	st.HandleStreams(func(stream *transport.Stream) {
+		// todo 执行业务处理的过程不会阻塞
+		// todo 确认每一个业务请求，触发一个 wg.Add(1)
 		wg.Add(1)
+		// todo 如果设置了 业务线程数， 则轮询分配给业务线程，如果阻塞，则新建goroutine进行业务逻辑处理
 		if s.opts.numServerWorkers > 0 {
 			data := &serverWorkerData{st: st, wg: &wg, stream: stream}
 			select {
@@ -829,6 +853,7 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 				}()
 			}
 		} else {
+			// todo 启动新的goroutine，进行业务逻辑处理
 			go func() {
 				defer wg.Done()
 				s.handleStream(st, stream, s.traceInfo(st, stream))
@@ -841,6 +866,7 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 		tr := trace.New("grpc.Recv."+methodFamily(method), method)
 		return trace.NewContext(ctx, tr)
 	})
+	// 等待当前 serverTransport 的业务请求都处理完成，返回
 	wg.Wait()
 }
 
@@ -1415,6 +1441,11 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 		server = srv.server
 	}
 	if s.opts.streamInt == nil {
+		// todo 理解 grpc 中的 stream 的使用场景功能和划分级别
+		// todo 即 对于client中同一个请求上下文的stream， server端怎么感知是同一个请求上下文，还是不区分？
+		// todo 不区分的话，就是 同一个上下文的多个stream请求和多个请求没有区别？
+		// todo 对于此处 server 端业务逻辑来讲，是在同一个 goroutine 的 handler 中处理的
+		// todo 还是server端感知不到这件事，在不同的 goroutine 中处理
 		appErr = sd.Handler(server, ss)
 	} else {
 		info := &StreamServerInfo{
@@ -1451,6 +1482,9 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 		ss.trInfo.tr.LazyLog(stringer("OK"), false)
 		ss.mu.Unlock()
 	}
+	// todo 确认 t.WriteStatus 的实际，代表中这个 stream 的结束？ （注意，不是 server transport级别，是 stream 级别的结束）
+	// todo 所以问题是，对于同一个client req的 多次 stream ， 是一个 stream id 还是不同 stream id
+	// todo 确认 http server 端读取到stream id 的判重逻辑和相应处理
 	err = t.WriteStatus(ss.s, statusOK)
 	if ss.binlog != nil {
 		ss.binlog.Log(&binarylog.ServerTrailer{

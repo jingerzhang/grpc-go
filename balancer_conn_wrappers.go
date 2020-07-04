@@ -192,14 +192,17 @@ type acBalancerWrapper struct {
 	mu sync.Mutex
 	ac *addrConn
 }
-
+// 更新  addr connection balancer wrapper 中 addr connection 中的 addrs 列表信息
 func (acbw *acBalancerWrapper) UpdateAddresses(addrs []resolver.Address) {
 	acbw.mu.Lock()
 	defer acbw.mu.Unlock()
+	// 如果需要更新的 addrs 为空列表，则 teardown addr connection
 	if len(addrs) <= 0 {
 		acbw.ac.tearDown(errConnDrain)
 		return
 	}
+	// 调用 addr connection 的 tryUpdateAddrs 方法，true/false 逻辑参考 ac.tryUpdateAddrs comments
+	// 如果为 false
 	if !acbw.ac.tryUpdateAddrs(addrs) {
 		cc := acbw.ac.cc
 		opts := acbw.ac.scopts
