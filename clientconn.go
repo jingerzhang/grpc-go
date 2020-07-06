@@ -140,9 +140,7 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 		opt.apply(&cc.dopts)
 	}
 
-	// todo 确认相关操作
 	chainUnaryClientInterceptors(cc)
-	// todo 确认相关操作
 	chainStreamClientInterceptors(cc)
 
 	defer func() {

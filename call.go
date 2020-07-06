@@ -63,10 +63,13 @@ func Invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 var unaryStreamDesc = &StreamDesc{ServerStreams: false, ClientStreams: false}
 
 func invoke(ctx context.Context, method string, req, reply interface{}, cc *ClientConn, opts ...CallOption) error {
+	// newClientStream 时， resolver 和 balancer 涉及的内容
+	// 返回一个可用的 client stream
 	cs, err := newClientStream(ctx, unaryStreamDesc, cc, method, opts...)
 	if err != nil {
 		return err
 	}
+	// sendMsg & retry 时， resolver 和 balancer 涉及的内容
 	if err := cs.SendMsg(req); err != nil {
 		return err
 	}

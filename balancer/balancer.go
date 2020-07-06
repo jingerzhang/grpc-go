@@ -129,6 +129,15 @@ type State struct {
 	Picker Picker
 }
 
+
+// balancer 需要调用的 client connetion 相关接口
+// NewSubConn， 在 balancer 中，需要调用 client connection 的 NewSubConn 方法，生成新的 SubConn
+// RemoveSubConn, 在 balancer 中，需要调用 client connection 的 RmoveSubConn 方法，移除 SubConn
+// UpdateState， 在 balancer 中，完成一些变更之后，调用 client connection 的 UpdateState 方法，变更 client connection 的 picker 以及
+// 更新 client connection 的 connectivity state manager 的状态
+// ResolveNow, 在 balancer 中， 调用 client connection 的 ResolveNow ， 触发 resolver resolve 重新进行名称解析
+// balancer 需要调用 client connection 相关的方法
+
 // ClientConn represents a gRPC ClientConn.
 //
 // This interface is to be implemented by gRPC. Users should not need a
@@ -286,6 +295,15 @@ type Picker interface {
 	//   status code Unavailable.
 	Pick(info PickInfo) (PickResult, error)
 }
+
+
+// client connection 需要调用 balancer 的方法
+// UpdateClientConnState， resolver addrs 变更时，自定义 resolver 调用 resolver client connection 的相关 updateResolverState
+// 方法，进而调用 balancer 的 UpdateClientConnState 方法，通知 balancer 进行变更；
+// UpdateSubConnState, client connection 中通过 connect/close/resetTransport 等方法触发的 sub connection state 的变化，通知
+// 到 balancer 中；
+// 上述两个方法的变化，balancer 逻辑处理完成之后，会调用client connection 的 updateState 来更新 client connection 中的 picker 和 client
+// connection 中的 connectivity state manager
 
 // Balancer takes input from gRPC, manages SubConns, and collects and aggregates
 // the connectivity states.

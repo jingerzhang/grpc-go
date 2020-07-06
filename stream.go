@@ -574,14 +574,18 @@ func (cs *clientStream) shouldRetry(err error) error {
 func (cs *clientStream) retryLocked(lastErr error) error {
 	for {
 		cs.attempt.finish(lastErr)
+		// 判断是否满足可以重试的条件
 		if err := cs.shouldRetry(lastErr); err != nil {
 			cs.commitAttemptLocked()
 			return err
 		}
 		cs.firstAttempt = false
+		// 重新负载均衡过程
 		if err := cs.newAttemptLocked(nil, nil); err != nil {
 			return err
 		}
+		// 执行需要重试的操作
+		// 缓存在 buffer 中 ？ 这里的考虑是？
 		if lastErr = cs.replayBufferLocked(); lastErr == nil {
 			return nil
 		}
